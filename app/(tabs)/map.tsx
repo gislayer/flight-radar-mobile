@@ -1,22 +1,90 @@
-import { StyleSheet, TouchableOpacity } from 'react-native';
+import { StyleSheet, TouchableOpacity, View, Text, Switch, Alert } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { ThemedView } from '@/components/ThemedView';
 import { Asset } from 'expo-asset';
 import { Ionicons } from '@expo/vector-icons';
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import * as Location from 'expo-location'; 
+import Slider from '@react-native-community/slider';
+import { Picker } from '@react-native-picker/picker';
 
+// ... rest of the code ...
+
+interface Basemap {
+  id: string;
+  name: string;
+}
 
 export default function MapScreen() {
+  const [settings, setSettings] = useState(false);
+  const [layers, setLayers] = useState(false);
+  const [buildings, setBuildings] = useState(true);
+  const [terrain, setTerrain] = useState(false);
 
-    const webViewRef = useRef(null);
+  const [pitch, setPitch] = useState(45);
+  const [bearing, setBearing] = useState(45);
+  const [zoom, setZoom] = useState(15);
 
-    const handleMessagePress = () => {
-        // Mesaj butonuna tıklandığında yapılacak işlemler
-        console.log('Mesaj butonuna tıklandı');
-        if (webViewRef.current) {
-            (webViewRef.current as any).injectJavaScript(`handleMessagePress("Hi this is test message");`);
-        }
-    };
+  const [activeBasemap, setActiveBasemap] = useState('satellite');
+
+  var basemaps: Record<string, Basemap> = {
+    'satellite': {id:'satellite', name:'Satellite'},
+    'light': {id:'light', name:'Light'},
+    'dark': {id:'dark', name:'Dark'},
+    'street': {id:'street', name:'Street'},
+  }
+
+  const webViewRef = useRef(null);
+  const handleMessagePress = () => {
+      const getLocation = async () => {
+          try {
+              const { status } = await Location.requestForegroundPermissionsAsync();
+              if (status !== 'granted') {
+                  console.error('Konum izni reddedildi');
+                  return;
+              }
+
+              const location = await Location.getCurrentPositionAsync({});
+              const lat = location.coords.latitude;
+              const lng = location.coords.longitude;
+              
+              if (webViewRef.current) {
+                  (webViewRef.current as any).injectJavaScript(`
+                      map.flyTo({
+                          center: [${lng}, ${lat}],
+                          zoom: 15
+                      });
+                  `);
+              }
+          } catch (error) {
+              console.error('Konum alınamadı:', error);
+          }
+      };
+      getLocation();
+  };
+
+  useEffect(() => {
+    if (webViewRef.current) {
+      (webViewRef.current as any).injectJavaScript(`
+        map.setPitch(${pitch});
+        map.setBearing(${bearing});
+        map.setZoom(${zoom});
+      `);
+    }
+  },[pitch,bearing,zoom])
+
+  const closeAll = ()=>{
+    setSettings(false);
+    setLayers(false);
+  }
+
+  const changeBasemap = (b: Basemap)=>{
+    if (webViewRef.current) {
+      (webViewRef.current as any).injectJavaScript(`
+        changeIt('${b.id}');
+      `);
+    }
+  }
 
   return ( 
     <ThemedView style={styles.container}>
@@ -31,8 +99,123 @@ export default function MapScreen() {
         style={styles.messageButton}
         onPress={handleMessagePress}
       >
-        <Ionicons name="chatbubble-ellipses" size={24} color="white" />
+        <Ionicons name="locate" size={32} color="#fff" />
       </TouchableOpacity>
+      <TouchableOpacity 
+        style={styles.settingsButton}
+        onPress={()=>{closeAll(); setSettings(!settings)}}
+      >
+        <Ionicons name="settings-outline" size={24} color={settings ? '#ffc107' : '#fff'} />
+      </TouchableOpacity>
+      <TouchableOpacity 
+        style={styles.layersButton}
+        onPress={()=>{closeAll(); setLayers(!layers)}}
+      >
+        <Ionicons name="layers-outline" size={24} color={layers ? '#ffc107' : '#fff'} />
+      </TouchableOpacity>
+
+      {
+        layers && (
+          <View style={styles.layersContainer}>
+            <TouchableOpacity style={styles.selectContainer} onPress={() => {
+              // Basemap seçimi için modal veya dropdown açılabilir
+              Alert.alert(
+                "Select Basemap",
+                "Please select a basemap",
+                Object.values(basemaps).map((basemap) => ({
+                  text: basemap.name,
+                  onPress: () => {
+                    setActiveBasemap(basemap.id);
+                    changeBasemap(basemap);
+                  }
+                }))
+              );
+            }}>
+              <Text style={styles.layerLabel}>Basemaps</Text>
+              <View style={styles.selectBox}>
+                <Text style={[styles.layerLabel, {color: '#666'}]}>
+                  {basemaps[activeBasemap]?.name || 'Select a basemap'}
+                </Text>
+                <Ionicons name="chevron-down" style={{marginTop: 10}} size={20} color="#666" />
+              </View>
+              
+            </TouchableOpacity>
+
+            <View style={styles.switchContainer}>
+              <Text style={styles.layerLabel}>3D Buildings</Text>
+              <Switch
+                value={buildings}
+                onValueChange={(value) => {
+                  setBuildings(value);
+                  if (webViewRef.current) {
+                    (webViewRef.current as any).injectJavaScript(`
+                      map.setLayoutProperty('3d-buildings', 'visibility', '${value ? 'visible' : 'none'}');
+                    `);
+                  }
+                }}
+              />
+            </View>
+
+            <View style={styles.switchContainer}>
+              <Text style={styles.layerLabel}>Terrain</Text>
+              <Switch
+                value={terrain}
+                onValueChange={(value) => {
+                  setTerrain(value);
+                  if (webViewRef.current) {
+                    (webViewRef.current as any).injectJavaScript(`
+                      map.setTerrain({ 'source': 'mapbox-dem', 'exaggeration': ${value ? 1.5 : 0} });
+                    `);
+                  }
+                }}
+              />
+            </View>
+          </View>
+        )
+      }
+
+      {
+        settings && (<View style={styles.sliderContainer2}>
+          <Text style={styles.sliderLabel}>Zoom Level: {zoom.toFixed(2)}</Text>
+          <Slider
+            style={styles.slider}
+            value={zoom}
+            onValueChange={setZoom}
+            minimumValue={0}
+            maximumValue={22}
+            step={0.01}
+          />
+        </View>)
+      }
+      {
+        settings && (<View style={styles.sliderContainer}>
+          <View style={styles.sliderBox}>
+            <Text style={styles.sliderLabel}>Pitch: {pitch}°</Text>
+            <Slider
+              style={styles.slider}
+              value={pitch}
+              onValueChange={setPitch}
+              minimumValue={0}
+              maximumValue={90}
+              step={1}
+            />
+          </View>
+          <View style={styles.sliderBox}>
+            <Text style={styles.sliderLabel}>Azimuths: {bearing}°</Text>
+            <Slider
+              style={styles.slider}
+              value={bearing}
+              onValueChange={setBearing}
+              minimumValue={-180}
+              maximumValue={180}
+              step={1}
+            />
+          </View>
+        </View>)
+      }
+      
+      
+      
     </ThemedView>
   );
 }
@@ -44,23 +227,169 @@ const styles = StyleSheet.create({
   map: {
     flex: 1
   },
+  sliderContainer2: {
+    position: 'absolute',
+    bottom: 129,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    padding: 5,
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingStart:10,
+    paddingEnd:10,
+  },
+  sliderContainer: {
+    position: 'absolute',
+    bottom: 49,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    padding: 5,
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingStart:10,
+    paddingEnd:10,
+  },
+  sliderBox:{
+    width: '50%',
+  },
+  sliderBox2:{
+    width: '100%',
+    paddingStart:10,
+    paddingEnd:10,
+  },
+  sliderLabel:{
+    fontSize: 16,
+    marginBottom: 0,
+    marginTop:10,
+    textAlign: 'center',
+  },
+  slider: {
+    width: '100%',
+    height: 40,
+  },
   messageButton: {
     position: 'absolute',
-    bottom: 60,
+    top: 20,
     right: 10,
-    backgroundColor: '#2196F3',
-    width: 56,
-    height: 56,
+    backgroundColor: '#061b5e',
+    borderWidth: 1,
+    borderColor: '#fff',
+    width: 48,
+    height: 48,
     borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 5, // Android için gölge
-    shadowColor: '#000', // iOS için gölge
+    elevation: 5,
+    shadowColor: '#000',
     shadowOffset: {
       width: 0,
       height: 2,
     },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
-  }
+  },
+  layersButton:{
+    position: 'absolute',
+    top: 20,
+    left: 65,
+    backgroundColor: '#061b5e',
+    borderWidth: 1,
+    borderColor: '#fff',
+    width: 48,
+    height: 48,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,  
+  },
+  settingsButton:{
+    position: 'absolute',
+    top: 20,
+    left: 10,
+    backgroundColor: '#061b5e',
+    borderWidth: 1,
+    borderColor: '#fff',
+    width: 48,
+    height: 48,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  layersContainer:{
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 10,
+    height: 200,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+  },
+  selectBox:{
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
+  },
+  selectContainer:{
+    width: '100%',
+    paddingStart:10,
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingEnd:10,
+    marginBottom:10,
+    marginTop:10,
+  },
+  layerLabel:{
+    fontSize: 16,
+    marginBottom: 0,
+    marginTop:10,
+    textAlign: 'center',
+  },
+  picker:{
+    width: '100%',
+    height: 200,
+  },
+  switchContainer:{
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingStart:10,
+    paddingEnd:10,
+    marginBottom:10,
+    marginTop:10,
+  },
+  switchLabel:{
+    fontSize: 16,
+    marginBottom: 0,
+    marginTop:10,
+    textAlign: 'center',
+  },
+  switch:{
+    width: '50%',
+  },
 });

@@ -14,21 +14,231 @@
   <body>
     <div id="map"></div>
     <script>
-        var accesToken = `pk.eyJ1IjoiYWxpa2lsaWNoYXJpdGEiLCJhIjoiY2prcGpwajY4MnpqMDNxbXpmcnlrbWdneCJ9.0NaE-BID7eX38MDSY40-Qg`;
+      var accesToken = `pk.eyJ1IjoiYWxpa2lsaWNoYXJpdGEiLCJhIjoiY2prcGpwajY4MnpqMDNxbXpmcnlrbWdneCJ9.0NaE-BID7eX38MDSY40-Qg`;
       mapboxgl.accessToken = accesToken;
       const map = new mapboxgl.Map({
         container: 'map',
-        style: 'mapbox://styles/mapbox/streets-v12',
+        style: 'mapbox://styles/mapbox/dark-v11',
         center: [29.0335, 41.0053],
+        pitch: 45,
+        bearing: 45,
         zoom: 9
+      });
+      map.on('load', ()=>{
+        GL.addGoogleSatellite();
+        GL.addTerrainData();
+        GL.addBuildings();
+        GL.loadIcons();
+        GL.addFlights();
+      });
+      map.on('error', (err)=>{
+        //alert(JSON.stringify(err.message));
       });
     </script>
   </body>
 </html>
 <script>
-    const handleMessagePress = (text) => {
-        // Mesaj butonuna tıklandığında yapılacak işlemler
-        console.log(text);
-        alert(text);
-      };
+var GL = {};
+GL.map = map;
+
+var basemaps = {
+    'satellite': {id:'satellite', name:'Satellite', urls:[
+      'https://mts0.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+      'https://mts1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+      'https://mts2.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+      'https://mts3.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
+    ]},
+    'light': {id:'light', name:'Light', urls:[
+      'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+      'https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+      'https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+      'https://d.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'
+    ]},
+    'dark': {id:'dark', name:'Dark', urls:[
+      'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+      'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+      'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+      'https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+    ]},
+    'street': {id:'street', name:'Street', urls:[
+      'https://mts0.google.com/vt/lyrs=p&x={x}&y={y}&z={z}',
+      'https://mts1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}',
+      'https://mts2.google.com/vt/lyrs=p&x={x}&y={y}&z={z}',
+      'https://mts3.google.com/vt/lyrs=p&x={x}&y={y}&z={z}'
+    ]},
+  }
+
+GL.addGoogleSatellite = ()=>{
+  map.addSource('basemap', {
+    'type': 'raster',
+    'tiles': [
+      'https://mts0.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+      'https://mts1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+      'https://mts2.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+      'https://mts3.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
+    ],
+    'tileSize': 256
+  });
+
+  map.addLayer({
+    'id': 'basemap',
+    'type': 'raster',
+    'source': 'basemap',
+    'paint': {
+      'raster-opacity': 1
+    }
+  });
+}
+
+GL.changeBasemap = (key) => {
+  const urls = basemaps[key].urls;
+  try {
+    const source = map.getSource('basemap');
+    if (source) {
+      source.setTiles(urls);
+    }
+  } catch(e) {
+    console.error('Basemap değiştirme hatası:', e.message);
+  }
+}
+
+function changeIt(key){
+  GL.changeBasemap(key);
+}
+
+GL.addBuildings = ()=>{
+  map.addLayer({
+    'id': '3d-buildings',
+    'source': 'composite',
+    'source-layer': 'building',
+    'filter': ['==', 'extrude', 'true'],
+    'type': 'fill-extrusion',
+    'minzoom': 15,
+    'paint': {
+      'fill-extrusion-color': '#aaa',
+      'fill-extrusion-height': [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        15,
+        0,
+        15.05,
+        ['get', 'height']
+      ],
+      'fill-extrusion-base': [
+        'interpolate', 
+        ['linear'],
+        ['zoom'],
+        15,
+        0,
+        15.05,
+        ['get', 'min_height']
+      ],
+      'fill-extrusion-opacity': 0.6
+    }
+  });
+}
+
+GL.addTerrainData = ()=>{
+  map.addSource('mapbox-dem', {
+    'type': 'raster-dem',
+    'url': 'mapbox://mapbox.mapbox-terrain-dem-v1',
+    'tileSize': 512,
+    'maxzoom': 14
+  });
+
+  map.setTerrain({ 'source': 'mapbox-dem', 'exaggeration': 1.5 });
+
+  map.addLayer({
+    'id': 'sky',
+    'type': 'sky',
+    'paint': {
+      'sky-type': 'atmosphere',
+      'sky-atmosphere-sun': [0.0, 0.0],
+      'sky-atmosphere-sun-intensity': 15
+    }
+  });
+}
+
+GL.addFlights = ()=>{
+  const updateLastPoints = () => {
+    if (map.getSource('lastpoints')) {
+      map.removeLayer('lastpoints-layers');
+      map.removeLayer('lastpoints-layerg');
+      map.removeSource('lastpoints');
+    }
+
+    map.addSource('lastpoints', {
+      'type': 'vector',
+      'tiles': [`http://localhost:2004/lastpoints/${Date.now()}/{z}/{x}/{y}.pbf`]
+    });
+
+    map.addLayer({
+      'id': 'lastpoints-layerg',
+      'type': 'symbol',
+      'source': 'lastpoints',
+      'source-layer': 'lastpoints',
+      'layout': {
+        'icon-image': ['concat', 'typeg-', ['to-string', ['get', 'type']]],
+        'icon-size': 0.07,
+        'icon-allow-overlap': true,
+        'icon-rotate': ['get', 'bearing'],
+        'icon-rotation-alignment': 'map',
+        'icon-offset': [100, -100]
+      }
+    });
+    map.addLayer({
+      'id': 'lastpoints-layers',
+      'type': 'symbol',
+      'source': 'lastpoints',
+      'source-layer': 'lastpoints',
+      'layout': {
+        'icon-image': ['concat', 'types-', ['to-string', ['get', 'type']]],
+        'icon-size': 0.07,
+        'icon-allow-overlap': true,
+        'icon-rotate': ['get', 'bearing'],
+        'icon-rotation-alignment': 'map',
+      }
+    });
+  }
+
+  updateLastPoints();
+  setInterval(updateLastPoints, 5000);
+}
+
+GL.loadIcons = ()=>{
+  var icons = {
+    '1': './assets/map/img/types-1.png',
+    '2': './assets/map/img/types-2.png',
+    '3': './assets/map/img/types-3.png',
+    '4': './assets/map/img/types-4.png',
+    '5': './assets/map/img/types-5.png',
+    '6': './assets/map/img/types-6.png',
+    '7': './assets/map/img/types-7.png',
+    '8': './assets/map/img/types-8.png',
+  }
+  Object.keys(icons).forEach(key => {
+    map.loadImage(icons[key], (error, image) => {
+      if (error) throw error;
+      map.addImage(`types-${key}`, image);
+    });
+  });
+  var icons2 = {
+    '1': './assets/map/img/typeg-1.png',
+    '2': './assets/map/img/typeg-2.png',
+    '3': './assets/map/img/typeg-3.png',
+    '4': './assets/map/img/typeg-4.png',
+    '5': './assets/map/img/typeg-5.png',
+    '6': './assets/map/img/typeg-6.png',
+    '7': './assets/map/img/typeg-7.png',
+    '8': './assets/map/img/typeg-8.png',
+  }
+  Object.keys(icons2).forEach(key => {
+    map.loadImage(icons2[key], (error, image) => {
+      if (error) throw error;
+      map.addImage(`typeg-${key}`, image);
+    });
+  });
+}
+
 </script>
