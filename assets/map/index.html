@@ -6,6 +6,9 @@
     <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
     <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+    <script src="https://unpkg.com/three@0.126.0/build/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.126.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
     <style>
       body { margin: 0; padding: 0; }
       #map { position: absolute; top: 0; bottom: 0; width: 100%; }
@@ -14,22 +17,42 @@
   <body>
     <div id="map"></div>
     <script>
+      var latlng = [27.08462,38.60132];
       var accesToken = `pk.eyJ1IjoiYWxpa2lsaWNoYXJpdGEiLCJhIjoiY2prcGpwajY4MnpqMDNxbXpmcnlrbWdneCJ9.0NaE-BID7eX38MDSY40-Qg`;
       mapboxgl.accessToken = accesToken;
       const map = new mapboxgl.Map({
         container: 'map',
         style: 'mapbox://styles/mapbox/dark-v11',
-        center: [29.0335, 41.0053],
-        pitch: 45,
-        bearing: 45,
+        center: latlng,
+        pitch: 0,
+        bearing: 0,
         zoom: 9
       });
       map.on('load', ()=>{
-        GL.addGoogleSatellite();
+        //GL.addGoogleSatellite();
         GL.addTerrainData();
         GL.addBuildings();
         GL.loadIcons();
         GL.addFlights();
+        
+        map.setCenter(latlng);
+        GL.addModel(latlng[1], latlng[0], 1000, 0, 100);
+        map.on('moveend', () => {
+          const zoom = map.getZoom();
+          const pitch = map.getPitch(); 
+          const bearing = map.getBearing();
+          const center = map.getCenter();
+          
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'mapState',
+            data: {
+              zoom: zoom,
+              pitch: pitch,
+              bearing: bearing,
+              center: [center.lng, center.lat]
+            }
+          }));
+        });
       });
       map.on('error', (err)=>{
         //alert(JSON.stringify(err.message));
@@ -40,6 +63,13 @@
 <script>
 var GL = {};
 GL.map = map;
+
+function sendLog(data){
+  window.ReactNativeWebView.postMessage(JSON.stringify({
+    type: 'log',
+    data: data
+  }));
+}
 
 var basemaps = {
     'satellite': {id:'satellite', name:'Satellite', urls:[
@@ -241,4 +271,197 @@ GL.loadIcons = ()=>{
   });
 }
 
+GL.addModel = (lat, lng, altitude, bearing, speed) => {
+  if (!GL.customLayer) {
+    const modelOrigin = [lng, lat];
+    const modelAltitude = altitude;
+    //const modelRotate = [0, 0, bearing * Math.PI / 180];
+    const modelRotate = [Math.PI/2, 0, 0];
+
+    const modelAsMercatorCoordinate = mapboxgl.MercatorCoordinate.fromLngLat(
+      modelOrigin,
+      modelAltitude
+    );
+
+    const modelTransform = {
+      translateX: modelAsMercatorCoordinate.x,
+      translateY: modelAsMercatorCoordinate.y,
+      translateZ: modelAsMercatorCoordinate.z,
+      rotateX: modelRotate[0],
+      rotateY: modelRotate[1],
+      rotateZ: modelRotate[2],
+      scale: modelAsMercatorCoordinate.meterInMercatorCoordinateUnits()
+    };
+
+    const THREE = window.THREE;
+
+    GL.customLayer = {
+      id: '3d-model',
+      type: 'custom',
+      renderingMode: '3d',
+      modelTransform: modelTransform,
+      onAdd: function (map, gl) {
+        this.camera = new THREE.Camera();
+        this.scene = new THREE.Scene();
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff);
+        directionalLight.position.set(0, -70, 100).normalize();
+        this.scene.add(directionalLight);
+
+        const directionalLight2 = new THREE.DirectionalLight(0xffffff);
+        directionalLight2.position.set(0, 70, 100).normalize();
+        this.scene.add(directionalLight2);
+
+        const loader = new THREE.GLTFLoader();
+        loader.load('./assets/map/model/plane/scene.gltf', (gltf) => {
+          this.scene.add(gltf.scene);
+        });
+        this.map = map;
+
+        this.renderer = new THREE.WebGLRenderer({
+          canvas: map.getCanvas(),
+          context: gl,
+          antialias: true
+        });
+
+        this.renderer.autoClear = false;
+      },
+      render: function (gl, matrix) {
+        const rotationX = new THREE.Matrix4().makeRotationAxis(
+          new THREE.Vector3(1, 0, 0),
+          this.modelTransform.rotateX
+        );
+        const rotationY = new THREE.Matrix4().makeRotationAxis(
+          new THREE.Vector3(0, 1, 0),
+          this.modelTransform.rotateY
+        );
+        const rotationZ = new THREE.Matrix4().makeRotationAxis(
+          new THREE.Vector3(0, 0, 1),
+          this.modelTransform.rotateZ
+        );
+
+        const m = new THREE.Matrix4().fromArray(matrix);
+        const l = new THREE.Matrix4()
+          .makeTranslation(
+            this.modelTransform.translateX,
+            this.modelTransform.translateY,
+            this.modelTransform.translateZ
+          )
+          .scale(
+            new THREE.Vector3(
+              this.modelTransform.scale,
+              -this.modelTransform.scale,
+              this.modelTransform.scale
+            )
+          )
+          .multiply(rotationX)
+          .multiply(rotationY)
+          .multiply(rotationZ);
+
+        this.camera.projectionMatrix = m.multiply(l);
+        this.renderer.resetState();
+        this.renderer.render(this.scene, this.camera);
+        this.map.triggerRepaint();
+      }
+    };
+
+    map.addLayer(GL.customLayer);
+  } else {
+    const modelOrigin = [lng, lat];
+    const modelAltitude = altitude;
+   // const modelRotate = [Math.PI / 2, 0, bearing * Math.PI / 180];
+    var extraAngle = 90;
+    /*if(bearing>0 && bearing<=90){extraAngle=-45};
+    if(bearing>90 && bearing<=180){extraAngle=77};
+    if(bearing>180 && bearing<=270){extraAngle=-75};
+    if(bearing>270 && bearing<=360){extraAngle=24};*/
+    var bearingRad = bearing * Math.PI / 180;
+    // Kuzey yönü Math.PI olduğundan, gelen bearing değerini buna göre ayarla
+    // Gelen bearing saat yönünde 0-360 derece arasında, 0=Kuzey
+    // Math.PI'den bearing'i çıkararak doğru açıyı hesapla
+    var newBearing = Math.PI - bearingRad;
+    const modelRotate = [Math.PI/2, newBearing, 0];
+
+    const modelAsMercatorCoordinate = mapboxgl.MercatorCoordinate.fromLngLat(
+      modelOrigin,
+      modelAltitude
+    );
+
+    GL.customLayer.modelTransform = {
+      translateX: modelAsMercatorCoordinate.x,
+      translateY: modelAsMercatorCoordinate.y,
+      translateZ: modelAsMercatorCoordinate.z,
+      rotateX: modelRotate[0],
+      rotateY: modelRotate[1],
+      rotateZ: modelRotate[2],
+      scale: modelAsMercatorCoordinate.meterInMercatorCoordinateUnits()
+    };
+  }
+}
+
+function getAwesomeRange(altitude){
+  var ranges = [
+    {minAlt:0, maxAlt:1000, zoom:12.8, pitch:60, len:0},
+    {minAlt:1000, maxAlt:2000, zoom:12.7, pitch:60, len:0},
+    {minAlt:2000, maxAlt:3000, zoom:12.5, pitch:60, len:2000},
+    {minAlt:3000, maxAlt:4000, zoom:12.3, pitch:60, len:3000},
+    {minAlt:4000, maxAlt:5000, zoom:12.1, pitch:60, len:4000},
+    {minAlt:5000, maxAlt:6000, zoom:11.9, pitch:60, len:5000},
+    {minAlt:6000, maxAlt:7000, zoom:11.7, pitch:60, len:8000},
+    {minAlt:7000, maxAlt:8000, zoom:11.5, pitch:60, len:9000},
+    {minAlt:8000, maxAlt:9000, zoom:11.4, pitch:60, len:11000},
+    {minAlt:9000, maxAlt:10000, zoom:11.2, pitch:60, len:14000},
+    {minAlt:10000, maxAlt:11000, zoom:11.1, pitch:60, len:16000},
+    {minAlt:11000, maxAlt:12000, zoom:10.8, pitch:60, len:17000},
+    {minAlt:12000, maxAlt:13000, zoom:10.5, pitch:60, len:18000},
+    {minAlt:13000, maxAlt:14000, zoom:10.3, pitch:60, len:21000},
+    {minAlt:14000, maxAlt:15000, zoom:10.2, pitch:60, len:23000},
+  ];
+  return ranges.find(range => altitude >= range.minAlt && altitude <= range.maxAlt);
+}
+
+var animationInterval;
+
+function watchPlane(lat, lng, altitude, speed, bearing){
+  if(animationInterval){
+    clearInterval(animationInterval);
+  }
+  var features = map.queryTerrainElevation([lng, lat]);
+  var terrainHeight = features ? features : 0;
+  GL.addModel(lat, lng, altitude, bearing, speed);
+  var range = getAwesomeRange(altitude);
+  var calculatedZoom = range.zoom;
+  var len = range.len;
+  var newCoord = turf.destination(turf.point([lng, lat]), len, bearing, {'units':'meters'});
+  map.flyTo({
+    center: newCoord.geometry.coordinates,
+    zoom: calculatedZoom,
+    pitch: 0,
+    bearing: bearing,
+    duration: 2000,
+    essential: true
+  });
+  // Her 100ms'de bir güncelleme yapalım
+  animationInterval = setInterval(() => {
+    const timeStep = 0.05; 
+    const distance = speed * timeStep; 
+    
+    const nextPoint = turf.destination(
+      turf.point([lng, lat]), 
+      distance/1000, 
+      bearing,
+      {units: 'kilometers'}
+    );
+    
+    const newLng = nextPoint.geometry.coordinates[0];
+    const newLat = nextPoint.geometry.coordinates[1];
+
+    GL.addModel(newLat, newLng, altitude, bearing, speed);
+    
+    lng = newLng;
+    lat = newLat;
+    
+  }, 100);
+}
 </script>
+

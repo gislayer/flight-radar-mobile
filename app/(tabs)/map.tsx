@@ -7,6 +7,9 @@ import { useEffect, useRef, useState } from 'react';
 import * as Location from 'expo-location'; 
 import Slider from '@react-native-community/slider';
 import { Picker } from '@react-native-picker/picker';
+import { useSelector } from 'react-redux';
+import { RootState } from '@/store/store';
+import { FlightData } from '@/lib/types';
 
 // ... rest of the code ...
 
@@ -16,6 +19,7 @@ interface Basemap {
 }
 
 export default function MapScreen() {
+  const route = useSelector((state: RootState) => state.route.route) as FlightData;
   const [settings, setSettings] = useState(false);
   const [layers, setLayers] = useState(false);
   const [buildings, setBuildings] = useState(true);
@@ -24,6 +28,7 @@ export default function MapScreen() {
   const [pitch, setPitch] = useState(45);
   const [bearing, setBearing] = useState(45);
   const [zoom, setZoom] = useState(15);
+  const [center, setCenter] = useState([0,0]);
 
   const [activeBasemap, setActiveBasemap] = useState('satellite');
 
@@ -86,6 +91,21 @@ export default function MapScreen() {
     }
   }
 
+  const watchPlane = ()=>{
+    if(route){
+      //debugger
+      var location = route?.point.coordinates;
+      var altitude = route?.altitude;
+      var speed = route?.speed;
+      var bearing = route?.bearing;
+      if (location && webViewRef.current) {
+        (webViewRef.current as any).injectJavaScript(`
+          watchPlane(${location[1]}, ${location[0]}, ${altitude}, ${speed}, ${bearing});
+        `);
+      }
+    }
+  }
+
   return ( 
     <ThemedView style={styles.container}>
       <WebView
@@ -94,6 +114,33 @@ export default function MapScreen() {
         source={{ uri: Asset.fromModule(require('../../assets/map/index.html')).uri }}
         javaScriptEnabled={true}
         domStorageEnabled={true}
+        allowFileAccess={true}
+        allowUniversalAccessFromFileURLs={true}
+        sharedCookiesEnabled={true}
+        thirdPartyCookiesEnabled={true}
+        allowFileAccessFromFileURLs={true}
+        allowContentAccess={true}
+        onMessage={(event) => {
+          try {
+            const message = JSON.parse(event.nativeEvent.data);
+            
+            if (message.type === 'mapState') {
+              var { zoom, pitch, bearing, center } = message.data;
+              zoom = parseFloat(zoom.toFixed(2));
+              pitch = parseFloat(pitch.toFixed(2));
+              bearing = parseFloat(bearing.toFixed(2));
+              setZoom(zoom);
+              setPitch(pitch);
+              setBearing(bearing);
+              setCenter(center);
+            }
+            if (message.type === 'log'){
+              console.log(message.data);
+            }
+          } catch (error) {
+            console.error('Message parsing error:', error);
+          }
+        }}
       />
       <TouchableOpacity 
         style={styles.messageButton}
@@ -113,6 +160,15 @@ export default function MapScreen() {
       >
         <Ionicons name="layers-outline" size={24} color={layers ? '#ffc107' : '#fff'} />
       </TouchableOpacity>
+      {
+        route && (<TouchableOpacity 
+          style={styles.watchButton}
+          onPress={()=>{closeAll(); watchPlane()}}
+        >
+          <Ionicons name="airplane-outline" size={24} color={layers ? '#ffc107' : '#fff'} />
+        </TouchableOpacity>)
+      }
+      
 
       {
         layers && (
@@ -180,7 +236,13 @@ export default function MapScreen() {
           <Slider
             style={styles.slider}
             value={zoom}
-            onValueChange={setZoom}
+            onValueChange={(value)=>{
+              if (webViewRef.current) {
+                (webViewRef.current as any).injectJavaScript(`
+                  map.setZoom(${value});
+                `);
+              }
+            }}
             minimumValue={0}
             maximumValue={22}
             step={0.01}
@@ -194,7 +256,13 @@ export default function MapScreen() {
             <Slider
               style={styles.slider}
               value={pitch}
-              onValueChange={setPitch}
+              onValueChange={(value)=>{
+                if (webViewRef.current) {
+                  (webViewRef.current as any).injectJavaScript(`
+                    map.setPitch(${value});
+                  `);
+                }
+              }}
               minimumValue={0}
               maximumValue={90}
               step={1}
@@ -205,7 +273,13 @@ export default function MapScreen() {
             <Slider
               style={styles.slider}
               value={bearing}
-              onValueChange={setBearing}
+              onValueChange={(value)=>{
+                if (webViewRef.current) {
+                  (webViewRef.current as any).injectJavaScript(`
+                    map.setBearing(${value});
+                  `);
+                }
+              }}
               minimumValue={-180}
               maximumValue={180}
               step={1}
@@ -298,6 +372,27 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 20,
     left: 65,
+    backgroundColor: '#061b5e',
+    borderWidth: 1,
+    borderColor: '#fff',
+    width: 48,
+    height: 48,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,  
+  },
+  watchButton:{
+    position: 'absolute',
+    top: 20,
+    left: 125,
     backgroundColor: '#061b5e',
     borderWidth: 1,
     borderColor: '#fff',

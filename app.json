@@ -11,6 +11,14 @@
     "ios": {
       "supportsTablet": true
     },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "assetExts": [
+      "gltf",
+      "bin",
+      "glb"
+    ],
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",

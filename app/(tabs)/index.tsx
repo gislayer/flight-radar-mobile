@@ -9,9 +9,12 @@ import { IconSymbol } from '@/components/ui/IconSymbol';
 import PlaneSlider from '@/components/PlaneSlider';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import * as turf from '@turf/turf';
-export default function HomeScreen() {
+import { useDispatch } from 'react-redux';
+import { setNewRoute, clearRoute } from '@/store/reducers/route';
 
-  const [routeId, setRouteId] = useState<number>(73211);
+export default function HomeScreen() {
+  const dispatch = useDispatch();
+  const [routeId, setRouteId] = useState<number>(75894);
   const [route, setRoute] = useState<FlightData>();
   const [progressInfo, setProgressInfo] = useState<{total:number, current:number}>({total:0, current:0});
   const api = new API({newurl:'http://localhost:2003/api'});
@@ -25,6 +28,7 @@ export default function HomeScreen() {
     var progressInfo = getProgressInfo(route);
     setProgressInfo(progressInfo);
     setRoute(route);
+    dispatch(setNewRoute(route));
   }
 
   const getProgressInfo = (route:FlightData) => {
