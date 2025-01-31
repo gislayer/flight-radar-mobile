@@ -1,0 +1,36 @@
+sudo npm install -g eas-cli
+eas login
+alikilicharita
+eas build:configure
+{
+  "build": {
+    "preview": {
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "preview2": {
+      "android": {
+        "gradleCommand": ":app:assembleRelease"
+      }
+    },
+    "production": {}
+  }
+}
+
+preview build
+eas build -p android --profile preview
+
+local build
+eas build --platform android --local
+
+dev build
+eas build --profile development --platform android
+
+production build
+eas build --platform android --profile production
+
+build following
+eas build:list
+build log
+eas build:view

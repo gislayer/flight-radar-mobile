@@ -2,14 +2,36 @@
   "expo": {
     "name": "flightradarmobile",
     "slug": "flightradarmobile",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSExceptionDomains": {
+            "192.168.1.23": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSIncludesSubdomains": true
+            }
+          }
+        },
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ],
+      "runtimeVersion": {
+        "policy": "appVersion"
+      },
+      "bundleIdentifier": "com.alikilicharita.flightradarmobile"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -23,6 +45,17 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
+      },
+      "package": "com.alikilicharita.flightradarmobile",
+      "networkSecurityConfig": {
+        "fileContents": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<network-security-config>\n <domain-config cleartextTrafficPermitted=\"true\">\n <domain includeSubdomains=\"true\">192.168.1.23</domain>\n </domain-config>\n</network-security-config>"
+      },
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ],
+      "runtimeVersion": {
+        "policy": "appVersion"
       }
     },
     "web": {
@@ -44,6 +77,35 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "6c1af098-3097-45dc-b0f8-efd4baaded57"
+      }
+    },
+    "updates": {
+      "url": "https://u.expo.dev/6c1af098-3097-45dc-b0f8-efd4baaded57"
+    },
+    "build": {
+      "preview": {
+        "android": {
+          "buildType": "apk"
+        }
+      },
+      "development": {
+        "android": {
+          "buildType": "apk",
+          "developmentClient": true
+        }
+      },
+      "production": {
+        "android": {
+            "buildType": "apk"
+          }
+      }
     }
   }
 }
