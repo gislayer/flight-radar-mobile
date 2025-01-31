@@ -1,4 +1,14 @@
-# Welcome to your Expo app 👋
+## Environment Setup
+
+For demo purposes, if you want to use this application, you need to modify the API and Socket URLs in the following files:
+
+### 1. app/(tabs)/messages.tsx
+Change the WebSocket URL to your server URL.
+
+### 2. app/(tabs)/flights.tsx  and app/(tabs)/index.tsx
+Modify the API URL in the following section:
+
+# Welcome to Flight Radar Demo app 👋
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
@@ -48,3 +58,7 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+
+
+
+
