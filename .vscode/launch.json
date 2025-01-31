@@ -11,7 +11,7 @@
             "skipFiles": [
                 "<node_internals>/**"
             ],
-            "program": "${workspaceFolder}/app/(tabs)/index.tsx",
+            "program": "${workspaceFolder}/app/(tabs)/map.tsx",
             "outFiles": [
                 "${workspaceFolder}/**/*.js"
             ]

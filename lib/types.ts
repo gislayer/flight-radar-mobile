@@ -76,3 +76,40 @@ export interface FlightData {
   aircraft: Aircraft;
   path: Path;
 }
+
+export interface TextMessageData {
+  type: 'text';
+  data: string;
+}
+
+export interface CommandMessageData {
+  type: 'command';
+  data: {
+    question: string;
+    true_answer: string;
+    false_answer: string;
+  };
+}
+
+export interface LocationMessageData {
+  type: 'location';
+  data: {
+    type: 'target' | 'airport' | 'emergency' | 'searching';
+    name : string;
+    latitude: number;
+    longitude: number;
+  };
+}
+
+export interface SendMessage {
+  user_id: number;
+  sender: string;
+  route_id: number;
+  message: {
+    type: 'text' | 'command' | 'location';
+    text?: TextMessageData;
+    command?: CommandMessageData;
+    location?: LocationMessageData;
+    timestamp: number;
+  };
+}

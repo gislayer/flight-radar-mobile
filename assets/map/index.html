@@ -26,10 +26,10 @@
         center: latlng,
         pitch: 0,
         bearing: 0,
-        zoom: 9
+        zoom: 5
       });
       map.on('load', ()=>{
-        //GL.addGoogleSatellite();
+        GL.addGoogleSatellite();
         GL.addTerrainData();
         GL.addBuildings();
         GL.loadIcons();
@@ -53,6 +53,10 @@
             }
           }));
         });
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'load',
+          data: true
+        }));
       });
       map.on('error', (err)=>{
         //alert(JSON.stringify(err.message));
@@ -128,7 +132,7 @@ GL.changeBasemap = (key) => {
       source.setTiles(urls);
     }
   } catch(e) {
-    console.error('Basemap değiştirme hatası:', e.message);
+    console.error('Basemap changing error:', e.message);
   }
 }
 
@@ -369,16 +373,8 @@ GL.addModel = (lat, lng, altitude, bearing, speed) => {
   } else {
     const modelOrigin = [lng, lat];
     const modelAltitude = altitude;
-   // const modelRotate = [Math.PI / 2, 0, bearing * Math.PI / 180];
     var extraAngle = 90;
-    /*if(bearing>0 && bearing<=90){extraAngle=-45};
-    if(bearing>90 && bearing<=180){extraAngle=77};
-    if(bearing>180 && bearing<=270){extraAngle=-75};
-    if(bearing>270 && bearing<=360){extraAngle=24};*/
     var bearingRad = bearing * Math.PI / 180;
-    // Kuzey yönü Math.PI olduğundan, gelen bearing değerini buna göre ayarla
-    // Gelen bearing saat yönünde 0-360 derece arasında, 0=Kuzey
-    // Math.PI'den bearing'i çıkararak doğru açıyı hesapla
     var newBearing = Math.PI - bearingRad;
     const modelRotate = [Math.PI/2, newBearing, 0];
 
@@ -436,12 +432,11 @@ function watchPlane(lat, lng, altitude, speed, bearing){
   map.flyTo({
     center: newCoord.geometry.coordinates,
     zoom: calculatedZoom,
-    pitch: 0,
+    pitch: 60,
     bearing: bearing,
     duration: 2000,
     essential: true
   });
-  // Her 100ms'de bir güncelleme yapalım
   animationInterval = setInterval(() => {
     const timeStep = 0.05; 
     const distance = speed * timeStep; 
@@ -460,8 +455,37 @@ function watchPlane(lat, lng, altitude, speed, bearing){
     
     lng = newLng;
     lat = newLat;
+    //map.setCenter([lng, lat]);
     
-  }, 100);
+  }, 50);
 }
+
+function addPopup(lng, lat, name) {
+  if(window.currentMarker) {
+    window.currentMarker.remove();
+  }
+  if(window.currentPopup) {
+    window.currentPopup.remove();
+  }
+
+  const popup = new mapboxgl.Popup({ 
+    closeButton: true,
+    closeOnClick: true 
+  })
+  .setLngLat([lng, lat])
+  .setHTML(`<h3>${name}</h3>`)
+  .addTo(map);
+
+  const marker = new mapboxgl.Marker()
+    .setLngLat([lng, lat])
+    .setPopup(popup)
+    .addTo(map);
+  window.currentMarker = marker;
+  window.currentPopup = popup;
+  setTimeout(() => {
+    window.currentPopup.open(map);
+  }, 1000);
+}
+
 </script>
 

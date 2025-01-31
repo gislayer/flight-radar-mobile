@@ -1,385 +1,543 @@
-import { Image, StyleSheet, TextInput, Pressable } from 'react-native';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { ThemedText } from '@/components/ThemedText';
+import { StyleSheet, TouchableOpacity, View, Text, Switch, Alert, Platform, DeviceEventEmitter } from 'react-native';
+import { WebView } from 'react-native-webview';
 import { ThemedView } from '@/components/ThemedView';
-import { useState } from 'react';
-import API from '@/lib/API';
-import { FlightData } from '@/lib/types';
-import { IconSymbol } from '@/components/ui/IconSymbol';
-import PlaneSlider from '@/components/PlaneSlider';
+import { Asset } from 'expo-asset';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import * as turf from '@turf/turf';
-import { useDispatch } from 'react-redux';
-import { setNewRoute, clearRoute } from '@/store/reducers/route';
+import { useEffect, useRef, useState } from 'react';
+import * as Location from 'expo-location';
+import Slider from '@react-native-community/slider';
+import { Picker } from '@react-native-picker/picker';
+import { useSelector } from 'react-redux';
+import { RootState } from '@/store/store';
+import { FlightData } from '@/lib/types';
 
-export default function HomeScreen() {
-  const dispatch = useDispatch();
-  const [routeId, setRouteId] = useState<number>(75894);
-  const [route, setRoute] = useState<FlightData>();
-  const [progressInfo, setProgressInfo] = useState<{total:number, current:number}>({total:0, current:0});
-  const api = new API({newurl:'http://localhost:2003/api'});
+interface Basemap {
+  id: string;
+  name: string;
+}
 
-  const clearRoute = () => {
-    setRoute(undefined);
+export default function MapScreen() {
+  const route = useSelector((state: RootState) => state.route.route) as FlightData;
+  const [settings, setSettings] = useState(false);
+  const [layers, setLayers] = useState(false);
+  const [buildings, setBuildings] = useState(true);
+  const [terrain, setTerrain] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  const [follow, setFollow] = useState(false);
+  const [oldView, setOldView] = useState<{zoom: number, pitch: number, bearing: number, center: [number, number]} | null>(null);
+  const isIOS = Platform.OS === 'ios';
+  const [pitch, setPitch] = useState(45);
+  const [bearing, setBearing] = useState(45);
+  const [zoom, setZoom] = useState(15);
+  const [center, setCenter] = useState<[number, number]>([0, 0]);
+  const [activeBasemap, setActiveBasemap] = useState('satellite');
+
+  var basemaps: Record<string, Basemap> = {
+    'satellite': { id: 'satellite', name: 'Satellite' },
+    'light': { id: 'light', name: 'Light' },
+    'dark': { id: 'dark', name: 'Dark' },
+    'street': { id: 'street', name: 'Street' },
   }
 
-  const getRoute = async () => {
-    const route = await api.get(`routes/${routeId}`) as FlightData;
-    var progressInfo = getProgressInfo(route);
-    setProgressInfo(progressInfo);
-    setRoute(route);
-    dispatch(setNewRoute(route));
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('zoomToLocation', (data: any) => {
+      if (loaded && webViewRef.current) {
+        (webViewRef.current as any).injectJavaScript(`
+          map.flyTo({
+            center: [${data.longitude}, ${data.latitude}],
+            zoom: ${data.zoom}
+          });
+          addPopup(${data.longitude}, ${data.latitude}, '${data.name}');
+        `);
+      }
+    });
+    return () => {
+      subscription.remove();
+    };
+  }, [loaded]);
+
+  const webViewRef = useRef(null);
+  const handleMessagePress = () => {
+    const getLocation = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          console.error('Permission denied');
+          return;
+        }
+
+        const location = await Location.getCurrentPositionAsync({});
+        const lat = location.coords.latitude;
+        const lng = location.coords.longitude;
+
+        if (webViewRef.current) {
+          (webViewRef.current as any).injectJavaScript(`
+            map.flyTo({
+              center: [${lng}, ${lat}],
+              zoom: 15
+            });
+          `);
+        }
+      } catch (error) {
+        console.error('Location error:', error);
+      }
+    };
+    getLocation();
+  };
+
+  useEffect(() => {
+    if (webViewRef.current) {
+      (webViewRef.current as any).injectJavaScript(`
+        map.setPitch(${pitch});
+        map.setBearing(${bearing});
+        map.setZoom(${zoom});
+      `);
+    }
+  }, [pitch, bearing, zoom])
+
+  const closeAll = () => {
+    setSettings(false);
+    setLayers(false);
   }
 
-  const getProgressInfo = (route:FlightData) => {
-    const start = route?.start_airport?.geometry;
-    const finish = route?.finish_airport?.geometry;
-    var total_length:number = start && finish ? turf.distance(
-      turf.point(start.coordinates), 
-      turf.point([finish.coordinates[0], finish.coordinates[1]]), 
-      {units: 'kilometers'}
-    ) : 0;
-
-    var last_point = route?.path?.features[route?.path?.features?.length-1]?.geometry;
-    var last_point_distance = last_point && start ? turf.distance(
-      turf.point(start.coordinates), 
-      turf.point(last_point.coordinates), 
-      {units: 'kilometers'}
-    ) : 0;
-    last_point_distance = Number(last_point_distance.toFixed(0));
-    var percentage = (last_point_distance / total_length) * 100;
-    percentage = Number(percentage.toFixed(2));
-    return {
-      current: last_point_distance,
-      total: total_length
+  const changeBasemap = (b: Basemap) => {
+    if (webViewRef.current) {
+      (webViewRef.current as any).injectJavaScript(`
+        changeIt('${b.id}');
+      `);
     }
   }
 
-  const getAirportShortName = (name:string) => {
-    return name.split(' ').map(word => word.charAt(0).toUpperCase()).join('');
-  }
-
-  const getAircraftImage = ()=>{
-    try {
-      if(!route){
-        return require('@/assets/images/mobile-baykar.png');
+  const watchPlane = () => {
+    if (route) {
+      var location = route?.point.coordinates;
+      var altitude = route?.altitude;
+      var speed = route?.speed;
+      var bearing = route?.bearing;
+      if (location && webViewRef.current) {
+        (webViewRef.current as any).injectJavaScript(`
+          watchPlane(${location[1]}, ${location[0]}, ${altitude}, ${speed}, ${bearing});
+        `);
       }
-      const images:any = {
-        1: require('@/assets/images/aircrafts/1.png'),
-        2: require('@/assets/images/aircrafts/2.png'),
-        3: require('@/assets/images/aircrafts/3.png'),
-        4: require('@/assets/images/aircrafts/4.png'),
-        5: require('@/assets/images/aircrafts/5.png'),
-        6: require('@/assets/images/aircrafts/6.png'),
-        7: require('@/assets/images/aircrafts/7.png'),
-        8: require('@/assets/images/aircrafts/8.png'),
-      };
-      return images[route.aircraft.aircraftTypeId] || require('@/assets/images/mobile-baykar.png');
-    } catch (error) {
-      return require('@/assets/images/mobile-baykar.png');
-    }
-  }
-
-  const getBackgroundImage = () => {
-    try {
-      if (!route?.aircraft?.id) {
-        return require('@/assets/images/sky/1.jpg');
-      }
-      var bgImages = [
-       require('@/assets/images/sky/1.jpg'),
-       require('@/assets/images/sky/2.png'),
-       require('@/assets/images/sky/3.jpg'),
-       require('@/assets/images/sky/4.jpg'),
-       require('@/assets/images/sky/5.jpg'),
-       require('@/assets/images/sky/6.avif'),
-       require('@/assets/images/sky/7.jpg'),
-       require('@/assets/images/sky/8.jpg'),
-       require('@/assets/images/sky/9.jpg'),
-       require('@/assets/images/sky/10.jpg'),
-       require('@/assets/images/sky/11.jpg'),
-       require('@/assets/images/sky/12.jpg'),
-       require('@/assets/images/sky/13.jpg'),
-       require('@/assets/images/sky/14.jpg'),
-       require('@/assets/images/sky/15.jpg'),
-       require('@/assets/images/sky/16.webp'),
-       require('@/assets/images/sky/17.jpg'),
-       require('@/assets/images/sky/18.jpg'),
-       require('@/assets/images/sky/19.webp'),
-       require('@/assets/images/sky/20.jpg'),
-       require('@/assets/images/sky/21.jpeg'),
-       require('@/assets/images/sky/22.jpeg'),
-      ];
-      return bgImages[route.aircraft.id % bgImages.length];
-    } catch (error) {
-      return require('@/assets/images/sky/1.jpg');
     }
   }
 
   return (
     <ThemedView style={styles.container}>
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <ThemedView style={styles.headerContainer}>
-            <Image
-              source={getBackgroundImage()}
-              style={styles.headerBackground}
-            />
-            <Image
-              source={getAircraftImage()}
-              style={route ? styles.aircraftImage : styles.aircraftImage2}
-            />
-          </ThemedView>
-      }>
-      <ThemedView style={styles.inputContainer}>
-        <TextInput
-          style={styles.input}
-          value={routeId.toString()}
-          onChangeText={(text)=>{setRouteId(Number(text))}}
-          placeholder="Route No"
-          keyboardType="numeric"
-          onSubmitEditing={getRoute}
-        />
-        
-        <ThemedView style={styles.buttonContainer}>
-          <Pressable 
-            style={styles.button}
-            onPress={() => {
-              getRoute();
-            }}>
-            <IconSymbol name="magnifyingglass" size={20} color="white" />
-          </Pressable>
-          {route && (
-            <Pressable 
-              style={styles.button2}
-              onPress={() => {
-                clearRoute();
-              }}>
-              <IconSymbol name="trash" size={20} color="white" />
-            </Pressable>
-          )}
-        </ThemedView>
-      </ThemedView>
+      <WebView
+        ref={webViewRef}
+        style={styles.map}
+        source={{ uri: Asset.fromModule(require('../../assets/map/index.html')).uri }}
+        javaScriptEnabled={true}
+        domStorageEnabled={true}
+        allowFileAccess={true}
+        allowUniversalAccessFromFileURLs={true}
+        sharedCookiesEnabled={true}
+        thirdPartyCookiesEnabled={true}
+        allowFileAccessFromFileURLs={true}
+        allowContentAccess={true}
+        onMessage={(event) => {
+          try {
+            const message = JSON.parse(event.nativeEvent.data);
+
+            if (message.type === 'mapState') {
+              var { zoom, pitch, bearing, center } = message.data;
+
+              zoom = parseFloat(zoom.toFixed(2));
+              pitch = parseFloat(pitch.toFixed(2));
+              bearing = parseFloat(bearing.toFixed(2));
+
+              setZoom(zoom);
+              setPitch(pitch);
+              setBearing(bearing);
+              setCenter(center);
+            }
+            if (message.type === 'log') {
+              console.log(message.data);
+            }
+            if (message.type === 'load') {
+              setLoaded(message.data);
+            }
+          } catch (error) {
+            console.error('Message parsing error:', error);
+          }
+        }}
+      />
+      <TouchableOpacity
+        style={styles.messageButton}
+        onPress={handleMessagePress}
+      >
+        <Ionicons name="locate" size={32} color="#fff" />
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.settingsButton}
+        onPress={() => { closeAll(); setSettings(!settings) }}
+      >
+        <Ionicons name="settings-outline" size={24} color={settings ? '#ffc107' : '#fff'} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.layersButton}
+        onPress={() => { closeAll(); setLayers(!layers) }}
+      >
+        <Ionicons name="layers-outline" size={24} color={layers ? '#ffc107' : '#fff'} />
+      </TouchableOpacity>
       {
-        route && (
-        
-        <ThemedView style={styles.flightInfoContainer}>
-          <PlaneSlider 
-            value={progressInfo?.current} 
-            min={0}
-            max={progressInfo?.total}
-          />
-          <ThemedView style={styles.rowContainer}>
-            <Pressable style={styles.airportBox}>
-              <ThemedText style={styles.labelText}>DEPARTURE AIRPORT</ThemedText>
-              <ThemedText style={styles.airportCode}>{getAirportShortName(route.start_airport.name)}</ThemedText>
-              <ThemedText style={styles.airportName} numberOfLines={1}>
-                {route.start_airport.name}
-              </ThemedText>
-            </Pressable>
+        route && (<TouchableOpacity
+          style={styles.watchButton}
+          onPress={() => { 
+            if(follow==false){
+              setOldView({ zoom, pitch, bearing, center });
+              watchPlane()
+            }else{
+              if(oldView){
+                (webViewRef.current as any).injectJavaScript(`
+                  map.flyTo({
+                    center: [${oldView.center[0]}, ${oldView.center[1]}],
+                    zoom: ${oldView.zoom},
+                    pitch: ${oldView.pitch},
+                    bearing: ${oldView.bearing}
+                  });
+                `);
+              }
+            }
+            setFollow(!follow); 
             
-            <Pressable style={styles.airportBox}>
-              <ThemedText style={styles.labelText}>ARRIVAL AIRPORT</ThemedText>
-              <ThemedText style={styles.airportCode}>{getAirportShortName(route.finish_airport.name)}</ThemedText>
-              <ThemedText style={styles.airportName} numberOfLines={1}>
-                {route.finish_airport.name}
-              </ThemedText>
-            </Pressable>
-          </ThemedView>
+          }}
+        >
+          <Ionicons name="airplane-outline" size={24} color={follow ? '#ffc107' : '#fff'} />
+        </TouchableOpacity>)
+      }
 
-          <ThemedView style={styles.rowContainer}>
-            <ThemedView style={styles.infoBox}>
-              <ThemedView style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>
-                <MaterialIcons name="line-axis" size={16} color="#1e293b" />
-                <ThemedText style={styles.labelText2}>ALTITUDE</ThemedText>
-              </ThemedView>
-              <ThemedText style={[styles.valueText, {color: '#06b6d4'}]}>
-                {route.altitude.toFixed(2)} m
-              </ThemedText>
-            </ThemedView>
-            
-            <ThemedView style={styles.infoBox}>
-              <ThemedView style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>
-                <Ionicons name="speedometer-outline" size={16} color="#1e293b" />
-                <ThemedText style={styles.labelText2}>SPEED</ThemedText>
-              </ThemedView>
-              <ThemedText style={[styles.valueText, {color: '#16a34a'}]}>
-                {route.speed.toFixed(2)} km/h
-              </ThemedText>
-            </ThemedView>
-          </ThemedView>
+      {
+        layers && (
+          <View style={[styles.layersContainer, { bottom: isIOS ? 10 : 0 }]}>
+            {
+              isIOS ? (<TouchableOpacity style={styles.selectContainer} onPress={() => {
+                Alert.alert(
+                  "Select Basemap",
+                  "Please select a basemap",
+                  Object.values(basemaps).map((basemap) => ({
+                    text: basemap.name,
+                    onPress: () => {
+                      setActiveBasemap(basemap.id);
+                      changeBasemap(basemap);
+                    }
+                  }))
+                );
+              }}>
+                <Text style={styles.layerLabel}>Basemaps</Text>
+                <View style={styles.selectBox}>
+                  <Text style={[styles.layerLabel, { color: '#666' }]}>
+                    {basemaps[activeBasemap]?.name || 'Select a basemap'}
+                  </Text>
+                  <Ionicons name="chevron-down" style={{ marginTop: 10 }} size={20} color="#666" />
+                </View>
 
-          <ThemedView style={styles.rowContainer}>
-            <ThemedView style={styles.infoBox}>
-              <ThemedView style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>
-                <Ionicons name="compass-outline" size={16} color="#1e293b" />
-                <ThemedText style={styles.labelText2}>AZIMUTH</ThemedText>
-              </ThemedView>
-              <ThemedText style={[styles.valueText, {color: '#fbbf24'}]}>
-                {route.bearing.toFixed(2)}°
-              </ThemedText>
-            </ThemedView>
-            
-            <ThemedView style={styles.infoBox}>
-              <ThemedView style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>
-                <Ionicons name="person-outline" size={16} color="#1e293b" />
-                <ThemedText style={styles.labelText2}>PILOT</ThemedText>
-              </ThemedView>
-              <ThemedText style={[styles.valueText, {color: '#f87171'}]}>
-                {route.pilot.name}
-              </ThemedText>
-            </ThemedView>
-          </ThemedView>
-        </ThemedView>
+              </TouchableOpacity>) : (
+                <View style={[styles.selectContainer, { height: 30, justifyContent: 'space-between' }]}>
+                  <Text style={[styles.layerLabel, { width: '80%', textAlign: 'left' }]}>Basemaps</Text>
+                  <Picker
+                    selectedValue={activeBasemap}
+                    style={styles.picker}
+                    onValueChange={(itemValue) => {
+                      setActiveBasemap(itemValue);
+                      changeBasemap(basemaps[itemValue]);
+                    }}>
+                    {Object.values(basemaps).map((basemap) => (
+                      <Picker.Item key={basemap.id} label={basemap.name} value={basemap.id} />
+                    ))}
+                  </Picker>
+                  <MaterialIcons name="move-down" style={{ marginTop: 10 }} size={20} color="#666" />
+                </View>
+              )
+            }
+
+            <View style={styles.switchContainer}>
+              <Text style={styles.layerLabel}>3D Buildings</Text>
+              <Switch
+                value={buildings}
+                onValueChange={(value) => {
+                  setBuildings(value);
+                  if (webViewRef.current) {
+                    (webViewRef.current as any).injectJavaScript(`
+                      map.setLayoutProperty('3d-buildings', 'visibility', '${value ? 'visible' : 'none'}');
+                    `);
+                  }
+                }}
+              />
+            </View>
+
+            <View style={styles.switchContainer}>
+              <Text style={styles.layerLabel}>Terrain</Text>
+              <Switch
+                value={terrain}
+                onValueChange={(value) => {
+                  setTerrain(value);
+                  if (webViewRef.current) {
+                    (webViewRef.current as any).injectJavaScript(`
+                      map.setTerrain({ 'source': 'mapbox-dem', 'exaggeration': ${value ? 1.5 : 0} });
+                    `);
+                  }
+                }}
+              />
+            </View>
+          </View>
         )
       }
-      
-    </ParallaxScrollView>
+
+      {
+        settings && (<View style={[styles.sliderContainer2, { bottom: isIOS ? 129 : 81 }]}>
+          <Text style={styles.sliderLabel}>Zoom Level: {zoom.toFixed(2)}</Text>
+          <Slider
+            style={styles.slider}
+            value={zoom}
+            onValueChange={(value) => {
+              if (webViewRef.current) {
+                (webViewRef.current as any).injectJavaScript(`
+                  map.setZoom(${value});
+                `);
+              }
+            }}
+            minimumValue={0}
+            maximumValue={22}
+            step={0.01}
+          />
+        </View>)
+      }
+      {
+        settings && (<View style={[styles.sliderContainer, { bottom: isIOS ? 49 : 0 }]}>
+          <View style={styles.sliderBox}>
+            <Text style={styles.sliderLabel}>Pitch: {pitch.toFixed(2)}°</Text>
+            <Slider
+              style={styles.slider}
+              value={pitch}
+              onValueChange={(value) => {
+                if (webViewRef.current) {
+                  (webViewRef.current as any).injectJavaScript(`
+                    map.setPitch(${value});
+                  `);
+                }
+              }}
+              minimumValue={0}
+              maximumValue={90}
+              step={1}
+            />
+          </View>
+          <View style={styles.sliderBox}>
+            <Text style={styles.sliderLabel}>Azimuth : {bearing.toFixed(2)}°</Text>
+            <Slider
+              style={styles.slider}
+              value={bearing}
+              onValueChange={(value) => {
+                if (webViewRef.current) {
+                  (webViewRef.current as any).injectJavaScript(`
+                    map.setBearing(${value});
+                  `);
+                }
+              }}
+              minimumValue={-180}
+              maximumValue={180}
+              step={1}
+            />
+          </View>
+        </View>)
+      }
+
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  scrollView: {
-    padding: 0,  // Tüm padding'i sıfırla
-  },
   container: {
     flex: 1,
   },
-  backgroundImage: {
+  map: {
+    flex: 1
+  },
+  sliderContainer2: {
     position: 'absolute',
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  bgImage: {
-    width: '100%',
-    bottom: 0,
+    bottom: 129,
     left: 0,
+    right: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    padding: 5,
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingStart: 10,
+    paddingEnd: 10,
+  },
+  sliderContainer: {
     position: 'absolute',
-    backgroundImage: 'url(@/assets/images/sky/1.jpg)',
-    top:0
-  },
-  inputContainer: {
+    bottom: 49,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    padding: 5,
+    display: 'flex',
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 8,
+    paddingStart: 10,
+    paddingEnd: 10,
   },
-  input: {
-    flex: 1,
-    height: 45,
-    borderColor: '#efefef',
-    borderRadius: 5,
-    borderWidth: 1,
-    paddingHorizontal: 10,
+  sliderBox: {
+    width: '50%',
   },
-  buttonContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  sliderBox2: {
+    width: '100%',
+    paddingStart: 10,
+    paddingEnd: 10,
   },
-  button: {
-    backgroundColor: '#BBD686',
-    padding: 10,
-    borderRadius: 5,
-  },
-  button2: {
-    backgroundColor: '#ffc107',
-    padding: 10,
-    borderRadius: 5,
-  },
-  buttonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  flightInfoContainer: {
-    flex: 1,
-    padding: 0,
-  },
-  rowContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  airportBox: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 8,
-    borderWidth: 1,
-    borderColor: '#1e293b20',
-    borderRadius: 5,
-    padding: 10,
-    backgroundColor:'#1e293b08',
-    marginBottom:10
-  },
-  labelText: {
-    fontSize: 9,
-    fontWeight: 'bold',
-  },
-  labelText2: {
+  sliderLabel: {
     fontSize: 16,
-    fontWeight: 'bold',
+    marginBottom: 0,
+    marginTop: 10,
+    textAlign: 'center',
   },
-  airportCode: {
-    fontSize: 24,
-    fontWeight: 'bold',
+  slider: {
+    width: '100%',
+    height: 40,
   },
-  airportName: {
-    fontSize: 12,
-  },
-  infoBox: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 8,
+  messageButton: {
+    position: 'absolute',
+    top: 20,
+    right: 10,
+    backgroundColor: '#061b5e',
     borderWidth: 1,
-    borderColor: '#1e293b20',
-    borderRadius: 5,
-    padding: 10,
-    backgroundColor:'#1e293b08',
-    marginBottom:10
+    borderColor: '#fff',
+    width: 48,
+    height: 48,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
   },
-  valueText: {
+  layersButton: {
+    position: 'absolute',
+    top: 20,
+    left: 65,
+    backgroundColor: '#061b5e',
+    borderWidth: 1,
+    borderColor: '#fff',
+    width: 48,
+    height: 48,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  watchButton: {
+    position: 'absolute',
+    top: 20,
+    left: 125,
+    backgroundColor: '#061b5e',
+    borderWidth: 1,
+    borderColor: '#fff',
+    width: 48,
+    height: 48,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  settingsButton: {
+    position: 'absolute',
+    top: 20,
+    left: 10,
+    backgroundColor: '#061b5e',
+    borderWidth: 1,
+    borderColor: '#fff',
+    width: 48,
+    height: 48,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  layersContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 10,
+    height: 200,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+  },
+  selectBox: {
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
+  },
+  selectContainer: {
+    width: '100%',
+    paddingStart: 10,
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingEnd: 10,
+    marginBottom: 10,
+    marginTop: 10,
+  },
+  layerLabel: {
     fontSize: 16,
-    fontWeight: 'bold',
+    marginBottom: 0,
+    marginTop: 10,
+    textAlign: 'center',
   },
-  contactButton: {
-    backgroundColor: '#BBD686',
-    padding: 10,
-    borderRadius: 5,
-  },
-  contactButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  headerContainer: {
+  picker: {
     width: '100%',
-    height: '100%',
+    height: 200,
   },
-  headerBackground: {
-    position: 'absolute',
+  switchContainer: {
     width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingStart: 10,
+    paddingEnd: 10,
+    marginBottom: 10,
+    marginTop: 10,
   },
-  aircraftImage: {
-    width: '100%',
-    height: '100%',
-    position: 'absolute',
-    resizeMode: 'contain',
-    padding:20
+  switchLabel: {
+    fontSize: 16,
+    marginBottom: 0,
+    marginTop: 10,
+    textAlign: 'center',
   },
-  aircraftImage2: {
-    width: '100%',
-    height: '100%',
-    position: 'absolute'
+  switch: {
+    width: '50%',
   },
 });
