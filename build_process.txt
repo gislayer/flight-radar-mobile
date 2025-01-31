@@ -23,6 +23,7 @@ eas build -p android --profile preview
 
 local build
 eas build --platform android --local
+eas build --platform android --profile preview --local
 
 dev build
 eas build --profile development --platform android
@@ -34,3 +35,5 @@ build following
 eas build:list
 build log
 eas build:view
+
+download_url : https://expo.dev/accounts/alikilicharita/projects/flightradarmobile/builds/868477ca-041c-40f9-bdb1-9a6984dfc522
