@@ -37,3 +37,11 @@ build log
 eas build:view
 
 download_url : https://expo.dev/accounts/alikilicharita/projects/flightradarmobile/builds/868477ca-041c-40f9-bdb1-9a6984dfc522
+
+npx expo run:ios
+npx expo run:android
+
+npx expo run:ios --device
+npx expo run:android --device
+
+

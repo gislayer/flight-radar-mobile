@@ -28,9 +28,6 @@
         "INTERNET",
         "ACCESS_NETWORK_STATE"
       ],
-      "runtimeVersion": {
-        "policy": "appVersion"
-      },
       "bundleIdentifier": "com.alikilicharita.flightradarmobile"
     },
     "assetBundlePatterns": [
@@ -53,10 +50,7 @@
       "permissions": [
         "INTERNET",
         "ACCESS_NETWORK_STATE"
-      ],
-      "runtimeVersion": {
-        "policy": "appVersion"
-      }
+      ]
     },
     "web": {
       "bundler": "metro",
